@@ -4,21 +4,19 @@
 #' @return
 #'   - `simulate_datafusion()` returns an object of class "DatafusionConnection"
 #'     that can be used to test SQL generation
-#'   - `sql_translation.DatafusionConnection()` returns a [dbplyr::sql_variant()]
-#'     that can be used to translate R expressions into SQL.
 #' @export
 #'
 #' @examples
-#' simulate_datafusion()
+#' library(dplyr, warn.conflicts = FALSE)
 #'
+#' lf <- dbplyr::lazy_frame(a = TRUE, b = 1, c = 2, d = "z", con = simulate_datafusion())
+#' lf %>% summarise(x = sd(b, na.rm = TRUE))
+#' lf %>% summarise(y = cor(b, c), z = cov(b, c))
 #'
 simulate_datafusion <- function() {
   dbplyr::simulate_dbi("DatafusionConnection")
 }
 
-#' @rdname simulate_datafusion
-#' @importFrom dbplyr sql_translation
-#' @export
 sql_translation.DatafusionConnection <- function(con) {
   base_postgres <- unclass(dbplyr::sql_translation(dbplyr::simulate_postgres()))
   dbplyr::sql_variant(

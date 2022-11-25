@@ -2,12 +2,9 @@
 % Please edit documentation in R/datafusion-sql.R
 \name{simulate_datafusion}
 \alias{simulate_datafusion}
-\alias{sql_translation.DatafusionConnection}
 \title{Datafusion SQL Translation}
 \usage{
 simulate_datafusion()
-
-sql_translation.DatafusionConnection(con)
 }
 \value{
 \itemize{
@@ -21,7 +18,10 @@ that can be used to translate R expressions into SQL.
 Datafusion SQL Translation
 }
 \examples{
-simulate_datafusion()
+library(dplyr, warn.conflicts = FALSE)
 
+lf <- dbplyr::lazy_frame(a = TRUE, b = 1, c = 2, d = "z", con = simulate_datafusion())
+lf \%>\% summarise(x = sd(b, na.rm = TRUE))
+lf \%>\% summarise(y = cor(b, c), z = cov(b, c))
 
 }
