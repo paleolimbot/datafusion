@@ -19,4 +19,4 @@ $(STATLIB):
 	rm -Rf $(LIBDIR)/build || true
 
 clean:
-	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) myrustlib/target
+	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) rustlib/target

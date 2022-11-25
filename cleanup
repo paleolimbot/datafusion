@@ -1,0 +1,4 @@
+
+rm src/*.o || true
+rm src/*.so || true
+rm -Rf src/rustlib/target/release
