@@ -1,0 +1,12 @@
+Package: datafusion
+Title: Experimental R Bindings to Datafusion
+Version: 0.0.0.9000
+Authors@R: 
+    person("Dewey", "Dunnington", , "dewey@dunnington.ca", role = c("aut", "cre"),
+           comment = c(ORCID = "0000-0002-9415-4582"))
+Description: Provides and experimental R interface to the 'DataFusion'
+  query engine.
+License: Apache License (>= 2)
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.1

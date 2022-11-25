@@ -1,0 +1,22 @@
+LIBDIR = rustlib/target/release
+STATLIB = $(LIBDIR)/librustlib.a
+PKG_CFLAGS = -pthread
+PKG_LIBS = -L$(LIBDIR) -lrustlib -lresolv -pthread
+
+#all: clean
+
+$(SHLIB): $(STATLIB)
+
+# CRAN policy forbids using $HOME so we build in the current working dir.
+# This makes things really slow because we have to reinstall all dependencies
+# for each build. Comment this out for non-CRAN releases.
+# CARGOTMP=$(PWD)/.cargo
+# export CARGO_HOME=$(CARGOTMP)
+
+$(STATLIB):
+	PATH="${PATH}:${HOME}/.cargo/bin" cargo build --release --manifest-path=rustlib/Cargo.toml
+	# rm -Rf $(CARGOTMP) || true #CRAN wants us to remove "detritus"
+	rm -Rf $(LIBDIR)/build || true
+
+clean:
+	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) myrustlib/target
