@@ -16,12 +16,15 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - {os: macos-latest,   r: 'release'}
-          - {os: windows-latest, r: 'release', target: 'x86_64-pc-windows-gnu'}
-          - {os: windows-latest, r: '4.1', target: 'x86_64-pc-windows-gnu'}
+          # - {os: macos-latest,   r: 'release'}
+          # Compilation doesn't fail here but linking does because there are
+          # too many symbols. All existing workarounds seem to be just to avoid
+          # msys2 which we can't do in this case.
+          # - {os: windows-latest, r: 'release', target: 'x86_64-pc-windows-gnu'}
+          # - {os: windows-latest, r: '4.1', target: 'x86_64-pc-windows-gnu'}
           - {os: ubuntu-latest,   r: 'devel', http-user-agent: 'release'}
-          - {os: ubuntu-latest,   r: 'release'}
-          - {os: ubuntu-latest,   r: 'oldrel-1'}
+          # - {os: ubuntu-latest,   r: 'release'}
+          # - {os: ubuntu-latest,   r: 'oldrel-1'}
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
