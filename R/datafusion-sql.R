@@ -25,3 +25,8 @@ sql_translation.DatafusionConnection <- function(con) {
     window = dbplyr::sql_translator(.parent = base_postgres$window)
   )
 }
+
+dummy_use_dplyr <- function() {
+  # CMD check complains that dplyr isn't used in the package
+  dplyr::n()
+}
