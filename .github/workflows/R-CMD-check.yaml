@@ -16,7 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          # - {os: macos-latest,   r: 'release'}
+          - {os: macos-latest,   r: 'release'}
           # Compilation doesn't fail here but linking does because there are
           # too many symbols. All existing workarounds seem to be just to avoid
           # msys2 which we can't do in this case.
