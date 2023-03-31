@@ -2,16 +2,12 @@
 #define STRICT_R_HEADERS
 #include <Rinternals.h>
 
-#include "datafusion.h"
-
-SEXP datafusion_testerino_wrapper(void) {
-  DFSessionContext* context = df_session_context_new();
-  df_session_context_free(context);
-  return Rf_ScalarInteger(1);
-}
+SEXP dfr_session_context_new(void);
+SEXP dfr_session_context_free(SEXP session_xptr);
 
 static const R_CallMethodDef CallEntries[] = {
-  {"datafusion_testerino_wrapper", (DL_FUNC) &datafusion_testerino_wrapper, 0},
+  {"dfr_session_context_new", (DL_FUNC) &dfr_session_context_new, 0},
+  {"dfr_session_context_free", (DL_FUNC) &dfr_session_context_free, 1},
   {NULL, NULL, 0}
 };
 

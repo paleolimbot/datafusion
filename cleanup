@@ -1,4 +1,0 @@
-
-rm src/*.o || true
-rm src/*.so || true
-rm -Rf src/datafusion-c/target/release
