@@ -9,7 +9,7 @@ Description: Provides and experimental R interface to the 'DataFusion'
 License: Apache License (>= 2)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.2.1
+RoxygenNote: 7.2.3
 Suggests: 
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
@@ -17,5 +17,4 @@ URL: https://github.com/paleolimbot/datafusion
 BugReports: https://github.com/paleolimbot/datafusion/issues
 Imports: 
     dbplyr,
-    dplyr,
     vctrs

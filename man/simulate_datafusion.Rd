@@ -10,8 +10,6 @@ simulate_datafusion()
 \itemize{
 \item \code{simulate_datafusion()} returns an object of class "DatafusionConnection"
 that can be used to test SQL generation
-\item \code{sql_translation.DatafusionConnection()} returns a \code{\link[dbplyr:sql_variant]{dbplyr::sql_variant()}}
-that can be used to translate R expressions into SQL.
 }
 }
 \description{

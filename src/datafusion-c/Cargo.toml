@@ -24,9 +24,6 @@ license = "Apache-2.0"
 keywords = ["arrow", "c"]
 edition = "2021"
 rust-version = "1.59"
-exclude = [
-  "/cpp/",
-]
 
 [lib]
 crate-type = ["staticlib"]
@@ -40,6 +37,3 @@ capi = []
 datafusion = "10"
 libc = "0.2"
 tokio = "1"
-
-[package.metadata.capi.header]
-subdirectory = false
