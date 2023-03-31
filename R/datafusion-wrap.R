@@ -7,11 +7,21 @@ df_session_context_free <- function(session) {
   invisible(.Call(dfr_session_context_free, session))
 }
 
-df_session_context_sql <- function(session, name, sql) {
+df_session_context_register_record_batches <- function(session, name, batches) {
 
 }
 
-df_session_context_register_record_batches <- function(session, name, batches) {
+df_session_context_register_csv <- function(session, name, url,
+                                            options = df_csv_read_options()) {
+
+}
+
+df_session_context_register_parquet <- function(session, name, url,
+                                                options = df_parquet_read_options()) {
+
+}
+
+df_session_context_sql <- function(session, name, sql) {
 
 }
 
