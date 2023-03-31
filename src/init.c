@@ -2,10 +2,12 @@
 #define STRICT_R_HEADERS
 #include <Rinternals.h>
 
-#include "rustlib/api.h"
+#include "datafusion.h"
 
 SEXP datafusion_testerino_wrapper(void) {
-  return Rf_ScalarInteger(datafusion_testerino());
+  DFSessionContext* context = df_session_context_new();
+  df_session_context_free(context);
+  return Rf_ScalarInteger(1);
 }
 
 static const R_CallMethodDef CallEntries[] = {

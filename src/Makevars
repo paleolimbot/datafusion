@@ -1,7 +1,7 @@
-LIBDIR = rustlib/target/release
-STATLIB = $(LIBDIR)/librustlib.a
+LIBDIR = datafusion-c/target/release
+STATLIB = $(LIBDIR)/libdatafusion.a
 PKG_CFLAGS = -pthread
-PKG_LIBS = -L$(LIBDIR) -lrustlib -lresolv -pthread
+PKG_LIBS = -L$(LIBDIR) -ldatafusion -lresolv -pthread
 
 #all: clean
 
@@ -14,9 +14,9 @@ $(SHLIB): $(STATLIB)
 # export CARGO_HOME=$(CARGOTMP)
 
 $(STATLIB):
-	PATH="${PATH}:${HOME}/.cargo/bin" cargo build --release --manifest-path=rustlib/Cargo.toml
+	PATH="${PATH}:${HOME}/.cargo/bin" cargo build --release --manifest-path=datafusion-c/Cargo.toml
 	# rm -Rf $(CARGOTMP) || true #CRAN wants us to remove "detritus"
 	rm -Rf $(LIBDIR)/build || true
 
 clean:
-	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) rustlib/target
+	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) datafusion-c/target
