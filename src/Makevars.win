@@ -1,17 +1,17 @@
 TARGET = $(subst 64,x86_64,$(subst 32,i686,$(WIN)))-pc-windows-gnu
-LIBDIR = rustlib/target/$(TARGET)/release
-STATLIB = $(LIBDIR)/librustlib.a
-PKG_LIBS = -L$(LIBDIR) -lrustlib -lws2_32 -ladvapi32 -lgdi32 -lbcrypt -lcrypt32 -luserenv
+LIBDIR = datafusion-c/target/$(TARGET)/release
+STATLIB = $(LIBDIR)/libdatafusion.a
+PKG_LIBS = -L$(LIBDIR) -ldatafusion -lws2_32 -ladvapi32 -lgdi32 -lbcrypt -lcrypt32 -luserenv
 
 all: clean rustup
 
 $(SHLIB): $(STATLIB)
 
 $(STATLIB):
-	PATH="$(USERPROFILE)\.cargo\bin:$(PATH)" cargo build --target=$(TARGET) --release --manifest-path=rustlib/Cargo.toml
+	PATH="$(USERPROFILE)\.cargo\bin:$(PATH)" cargo build --target=$(TARGET) --release --manifest-path=datafusion-c/Cargo.toml
 
 clean:
-	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) rustlib/target
+	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) datafusion-c/target
 
 rustup:
 	rustup target add $(TARGET) || true
