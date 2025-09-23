@@ -2400,7 +2400,7 @@ dependencies = [
 name = "datafusion-macros"
 version = "49.0.2"
 dependencies = [
- "datafusion-expr",
+ "datafusion-doc",
  "quote",
  "syn 2.0.104",
 ]

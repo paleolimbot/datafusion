@@ -967,3 +967,83 @@ The following regular expression functions are supported:"#,
         description: Some("Functions to work with the union data type, also know as tagged unions, variant types, enums or sum types. Note: Not related to the SQL UNION operator"),
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use datafusion_expr_common::signature::Volatility;
+    use std::hash::DefaultHasher;
+
+    #[derive(Debug, PartialEq, Eq, Hash)]
+    struct TestScalarUDFImpl {
+        name: &'static str,
+        field: &'static str,
+        signature: Signature,
+    }
+    impl ScalarUDFImpl for TestScalarUDFImpl {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn signature(&self) -> &Signature {
+            &self.signature
+        }
+
+        fn return_type(&self, _arg_types: &[DataType]) -> Result<DataType> {
+            unimplemented!()
+        }
+
+        fn invoke_with_args(&self, _args: ScalarFunctionArgs) -> Result<ColumnarValue> {
+            unimplemented!()
+        }
+    }
+
+    // PartialEq and Hash must be consistent, and also PartialEq and PartialOrd
+    // must be consistent, so they are tested together.
+    #[test]
+    fn test_partial_eq_hash_and_partial_ord() {
+        // A parameterized function
+        let f = test_func("foo", "a");
+
+        // Same like `f`, different instance
+        let f2 = test_func("foo", "a");
+        assert_eq!(f, f2);
+        assert_eq!(hash(&f), hash(&f2));
+        assert_eq!(f.partial_cmp(&f2), Some(Ordering::Equal));
+
+        // Different parameter
+        let b = test_func("foo", "b");
+        assert_ne!(f, b);
+        assert_ne!(hash(&f), hash(&b)); // hash can collide for different values but does not collide in this test
+        assert_eq!(f.partial_cmp(&b), None);
+
+        // Different name
+        let o = test_func("other", "a");
+        assert_ne!(f, o);
+        assert_ne!(hash(&f), hash(&o)); // hash can collide for different values but does not collide in this test
+        assert_eq!(f.partial_cmp(&o), Some(Ordering::Less));
+
+        // Different name and parameter
+        assert_ne!(b, o);
+        assert_ne!(hash(&b), hash(&o)); // hash can collide for different values but does not collide in this test
+        assert_eq!(b.partial_cmp(&o), Some(Ordering::Less));
+    }
+
+    fn test_func(name: &'static str, parameter: &'static str) -> ScalarUDF {
+        ScalarUDF::from(TestScalarUDFImpl {
+            name,
+            field: parameter,
+            signature: Signature::any(1, Volatility::Immutable),
+        })
+    }
+
+    fn hash<T: Hash>(value: &T) -> u64 {
+        let hasher = &mut DefaultHasher::new();
+        value.hash(hasher);
+        hasher.finish()
+    }
+}
