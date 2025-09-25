@@ -106,11 +106,7 @@ pub use partition_evaluator::PartitionEvaluator;
 pub use sqlparser;
 pub use table_source::{TableProviderFilterPushDown, TableSource, TableType};
 pub use udaf::{
-    aggregate_doc_sections, AggregateUDF, AggregateUDFImpl, ReversedUDAF,
-    SetMonotonicity, StatisticsArgs,
-    udaf_default_display_name, udaf_default_human_display, udaf_default_return_field,
-    udaf_default_schema_name, udaf_default_window_function_display_name,
-    udaf_default_window_function_schema_name,
+    AggregateUDF, AggregateUDFImpl, ReversedUDAF, SetMonotonicity, StatisticsArgs,
 };
 pub use udf::{ReturnFieldArgs, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl};
 pub use udwf::{ReversedUDWF, WindowUDF, WindowUDFImpl};
