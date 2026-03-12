@@ -3004,7 +3004,7 @@ async fn test_count_wildcard_on_sort() -> Result<()> {
     +---------------+------------------------------------------------------------------------------------+
     | plan_type     | plan                                                                               |
     +---------------+------------------------------------------------------------------------------------+
-    | logical_plan  | Sort: count(*) AS count(*) ASC NULLS LAST                                          |
+    | logical_plan  | Sort: count(*) ASC NULLS LAST                                                      |
     |               |   Projection: t1.b, count(Int64(1)) AS count(*)                                    |
     |               |     Aggregate: groupBy=[[t1.b]], aggr=[[count(Int64(1))]]                          |
     |               |       TableScan: t1 projection=[b]                                                 |

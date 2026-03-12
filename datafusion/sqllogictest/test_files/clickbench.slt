@@ -205,7 +205,7 @@ query TT
 EXPLAIN SELECT "AdvEngineID", COUNT(*) FROM hits WHERE "AdvEngineID" <> 0 GROUP BY "AdvEngineID" ORDER BY COUNT(*) DESC;
 ----
 logical_plan
-01)Sort: count(*) AS count(*) DESC NULLS FIRST
+01)Sort: count(*) DESC NULLS FIRST
 02)--Projection: hits.AdvEngineID, count(Int64(1)) AS count(*)
 03)----Aggregate: groupBy=[[hits.AdvEngineID]], aggr=[[count(Int64(1))]]
 04)------SubqueryAlias: hits
@@ -431,7 +431,7 @@ query TT
 EXPLAIN SELECT "UserID", COUNT(*) FROM hits GROUP BY "UserID" ORDER BY COUNT(*) DESC LIMIT 10;
 ----
 logical_plan
-01)Sort: count(*) AS count(*) DESC NULLS FIRST, fetch=10
+01)Sort: count(*) DESC NULLS FIRST, fetch=10
 02)--Projection: hits.UserID, count(Int64(1)) AS count(*)
 03)----Aggregate: groupBy=[[hits.UserID]], aggr=[[count(Int64(1))]]
 04)------SubqueryAlias: hits
@@ -459,7 +459,7 @@ query TT
 EXPLAIN SELECT "UserID", "SearchPhrase", COUNT(*) FROM hits GROUP BY "UserID", "SearchPhrase" ORDER BY COUNT(*) DESC LIMIT 10;
 ----
 logical_plan
-01)Sort: count(*) AS count(*) DESC NULLS FIRST, fetch=10
+01)Sort: count(*) DESC NULLS FIRST, fetch=10
 02)--Projection: hits.UserID, hits.SearchPhrase, count(Int64(1)) AS count(*)
 03)----Aggregate: groupBy=[[hits.UserID, hits.SearchPhrase]], aggr=[[count(Int64(1))]]
 04)------SubqueryAlias: hits
@@ -514,7 +514,7 @@ query TT
 EXPLAIN SELECT "UserID", extract(minute FROM to_timestamp_seconds("EventTime")) AS m, "SearchPhrase", COUNT(*) FROM hits GROUP BY "UserID", m, "SearchPhrase" ORDER BY COUNT(*) DESC LIMIT 10;
 ----
 logical_plan
-01)Sort: count(*) AS count(*) DESC NULLS FIRST, fetch=10
+01)Sort: count(*) DESC NULLS FIRST, fetch=10
 02)--Projection: hits.UserID, date_part(Utf8("MINUTE"),to_timestamp_seconds(hits.EventTime)) AS m, hits.SearchPhrase, count(Int64(1)) AS count(*)
 03)----Aggregate: groupBy=[[hits.UserID, date_part(Utf8("MINUTE"), to_timestamp_seconds(hits.EventTime)), hits.SearchPhrase]], aggr=[[count(Int64(1))]]
 04)------SubqueryAlias: hits
