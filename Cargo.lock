@@ -1893,12 +1893,12 @@ dependencies = [
 name = "datafusion-common"
 version = "52.3.0"
 dependencies = [
- "ahash",
  "apache-avro",
  "arrow",
  "arrow-ipc",
  "chrono",
  "criterion",
+ "foldhash 0.2.0",
  "half",
  "hashbrown 0.16.1",
  "hex",
@@ -2252,7 +2252,6 @@ dependencies = [
 name = "datafusion-functions-aggregate"
 version = "52.3.0"
 dependencies = [
- "ahash",
  "arrow",
  "criterion",
  "datafusion-common",
@@ -2263,6 +2262,7 @@ dependencies = [
  "datafusion-macros",
  "datafusion-physical-expr",
  "datafusion-physical-expr-common",
+ "foldhash 0.2.0",
  "half",
  "log",
  "num-traits",
@@ -2273,7 +2273,6 @@ dependencies = [
 name = "datafusion-functions-aggregate-common"
 version = "52.3.0"
 dependencies = [
- "ahash",
  "arrow",
  "criterion",
  "datafusion-common",
@@ -2383,7 +2382,6 @@ dependencies = [
 name = "datafusion-physical-expr"
 version = "52.3.0"
 dependencies = [
- "ahash",
  "arrow",
  "criterion",
  "datafusion-common",
@@ -2422,7 +2420,6 @@ dependencies = [
 name = "datafusion-physical-expr-common"
 version = "52.3.0"
 dependencies = [
- "ahash",
  "arrow",
  "chrono",
  "criterion",
@@ -2460,7 +2457,6 @@ dependencies = [
 name = "datafusion-physical-plan"
 version = "52.3.0"
 dependencies = [
- "ahash",
  "arrow",
  "arrow-ord",
  "arrow-schema",
