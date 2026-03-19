@@ -289,6 +289,9 @@ pub fn create_physical_expr(
             Ok(expressions::case(expr, when_then_expr, else_expr)?)
         }
         Expr::Cast(Cast { expr, field }) => {
+
+            // This is where we cast
+
             if !field.metadata().is_empty() {
                 let (_, src_field) = expr.to_field(input_dfschema)?;
                 return plan_err!(
