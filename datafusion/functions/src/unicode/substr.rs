@@ -32,8 +32,8 @@ use datafusion_common::types::{
 };
 use datafusion_common::{Result, exec_err};
 use datafusion_expr::{
-    Coercion, ColumnarValue, Documentation, ScalarUDFImpl, Signature, TypeSignature,
-    TypeSignatureClass, Volatility,
+    Coercion, ColumnarValue, Documentation, ScalarFunctionArgs, ScalarUDFImpl, Signature,
+    TypeSignature, TypeSignatureClass, Volatility,
 };
 use datafusion_macros::user_doc;
 
@@ -121,10 +121,7 @@ impl ScalarUDFImpl for SubstrFunc {
         Ok(DataType::Utf8View)
     }
 
-    fn invoke_with_args(
-        &self,
-        args: datafusion_expr::ScalarFunctionArgs,
-    ) -> Result<ColumnarValue> {
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
         make_scalar_function(substr, vec![])(&args.args)
     }
 
@@ -185,7 +182,10 @@ pub fn get_true_start_end(
     let start = start.checked_sub(1).unwrap_or(start);
 
     let end = match count {
-        Some(count) => start + count as i64,
+        Some(count) => {
+            let count_i64 = i64::try_from(count).unwrap_or(i64::MAX);
+            start.saturating_add(count_i64)
+        }
         None => input.len() as i64,
     };
     let count_to_end = count.is_some();
@@ -247,7 +247,7 @@ pub fn enable_ascii_fast_path<'a, V: StringArrayType<'a>>(
 
             // HACK: can be simplified if function has specialized
             // implementation for `ScalarValue` (implement without `make_scalar_function()`)
-            let avg_prefix_len = start
+            let total_prefix_len = start
                 .iter()
                 .zip(count.iter())
                 .take(n_sample)
@@ -255,11 +255,11 @@ pub fn enable_ascii_fast_path<'a, V: StringArrayType<'a>>(
                     let start = start.unwrap_or(0);
                     let count = count.unwrap_or(0);
                     // To get substring, need to decode from 0 to start+count instead of start to start+count
-                    start + count
+                    start.saturating_add(count)
                 })
-                .sum::<i64>();
+                .fold(0i64, |acc, val| acc.saturating_add(val));
 
-            avg_prefix_len as f64 / n_sample as f64 <= short_prefix_threshold
+            (total_prefix_len as f64 / n_sample as f64) <= short_prefix_threshold
         }
         None => false,
     };
@@ -810,7 +810,7 @@ mod tests {
             SubstrFunc::new(),
             vec![
                 ColumnarValue::Scalar(ScalarValue::from("abc")),
-                ColumnarValue::Scalar(ScalarValue::from(-9223372036854775808i64)),
+                ColumnarValue::Scalar(ScalarValue::from(i64::MIN)),
             ],
             Ok(Some("abc")),
             &str,
@@ -821,10 +821,22 @@ mod tests {
             SubstrFunc::new(),
             vec![
                 ColumnarValue::Scalar(ScalarValue::from("overflow")),
-                ColumnarValue::Scalar(ScalarValue::from(-9223372036854775808i64)),
+                ColumnarValue::Scalar(ScalarValue::from(i64::MIN)),
                 ColumnarValue::Scalar(ScalarValue::from(1i64)),
             ],
             exec_err!("negative overflow when calculating skip value"),
+            &str,
+            Utf8View,
+            StringViewArray
+        );
+        test_function!(
+            SubstrFunc::new(),
+            vec![
+                ColumnarValue::Scalar(ScalarValue::from("large count")),
+                ColumnarValue::Scalar(ScalarValue::from(2i64)),
+                ColumnarValue::Scalar(ScalarValue::from(i64::MAX)),
+            ],
+            Ok(Some("arge count")),
             &str,
             Utf8View,
             StringViewArray

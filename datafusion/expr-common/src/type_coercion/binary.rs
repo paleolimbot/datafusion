@@ -324,6 +324,9 @@ impl<'a> BinaryTypeCoercer<'a> {
                 )
             }
         },
+        Colon => {
+            Ok(Signature { lhs: lhs.clone(), rhs: rhs.clone(), ret: lhs.clone() })
+        },
         IntegerDivide | Arrow | LongArrow | HashArrow | HashLongArrow
         | HashMinus | AtQuestion | Question | QuestionAnd | QuestionPipe => {
             not_impl_err!("Operator {} is not yet supported", self.op)
@@ -470,7 +473,9 @@ fn bitwise_coercion(left_type: &DataType, right_type: &DataType) -> Option<DataT
         return None;
     }
 
-    if left_type == right_type {
+    let is_integer_dictionary =
+        matches!(left_type, Dictionary(_, value_type) if value_type.is_integer());
+    if left_type == right_type && (left_type.is_integer() || is_integer_dictionary) {
         return Some(left_type.clone());
     }
 
@@ -524,7 +529,7 @@ impl From<&DataType> for TypeCategory {
                     return TypeCategory::Numeric;
                 }
 
-                if matches!(data_type, DataType::Boolean) {
+                if *data_type == DataType::Boolean {
                     return TypeCategory::Boolean;
                 }
 
@@ -751,15 +756,15 @@ fn type_union_resolution_coercion(
 
 /// Handle type union resolution including struct type and others.
 pub fn try_type_union_resolution(data_types: &[DataType]) -> Result<Vec<DataType>> {
-    let err = match try_type_union_resolution_with_struct(data_types) {
+    let struct_err = match try_type_union_resolution_with_struct(data_types) {
         Ok(struct_types) => return Ok(struct_types),
-        Err(e) => Some(e),
+        Err(e) => e,
     };
 
     if let Some(new_type) = type_union_resolution(data_types) {
         Ok(vec![new_type; data_types.len()])
     } else {
-        exec_err!("Fail to find the coerced type, errors: {:?}", err)
+        exec_err!("Fail to find the coerced type, errors: {struct_err}")
     }
 }
 
