@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use crate::registry::ExtensionTypeRegistry;
 use crate::var_provider::{VarProvider, VarType};
 use chrono::{DateTime, Utc};
 use datafusion_common::HashMap;
@@ -42,6 +43,7 @@ pub struct ExecutionProps {
     pub config_options: Option<Arc<ConfigOptions>>,
     /// Providers for scalar variables
     pub var_providers: Option<HashMap<VarType, Arc<dyn VarProvider + Send + Sync>>>,
+    pub extension_types: Option<Arc<dyn ExtensionTypeRegistry>>,
 }
 
 impl Default for ExecutionProps {
@@ -58,6 +60,7 @@ impl ExecutionProps {
             alias_generator: Arc::new(AliasGenerator::new()),
             config_options: None,
             var_providers: None,
+            extension_types: None,
         }
     }
 
