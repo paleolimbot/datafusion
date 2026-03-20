@@ -1661,7 +1661,7 @@ impl SessionStateBuilder {
 
         // Temporary hack while we figure out how to get the extension types where they
         // need to go
-        state.execution_props.extension_types = Some(state.extension_types.clone());
+        state.execution_props.extension_types = Some(Arc::clone(&state.extension_types));
 
         state
     }
@@ -2184,7 +2184,7 @@ impl OptimizerConfig for SessionState {
     }
 
     fn extension_types(&self) -> Option<Arc<dyn ExtensionTypeRegistry>> {
-        Some(self.extension_types.clone())
+        Some(Arc::clone(&self.extension_types))
     }
 }
 
