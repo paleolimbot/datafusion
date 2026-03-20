@@ -53,15 +53,11 @@ impl DFExtensionType for arrow_schema::extension::Uuid {
         )))
     }
 
-    fn cast_from(
-        &self,
-    ) -> crate::Result<Arc<dyn CastExtension>> {
+    fn cast_from(&self) -> crate::Result<Arc<dyn CastExtension>> {
         Ok(Arc::new(CastToUuid {}))
     }
 
-    fn cast_to(
-        &self,
-    ) -> crate::Result<Arc<dyn CastExtension>> {
+    fn cast_to(&self) -> crate::Result<Arc<dyn CastExtension>> {
         Ok(Arc::new(CastFromUuid {}))
     }
 }
@@ -202,6 +198,8 @@ impl CastExtension for CastToUuid {
                         }
                     }
                 }
+
+                return Ok(Arc::new(builder.finish()));
             }
             // Can implicitly cast from storage
             DataType::FixedSizeBinary(16) => return Ok(value),

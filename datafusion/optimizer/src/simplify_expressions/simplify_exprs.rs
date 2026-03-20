@@ -101,7 +101,8 @@ impl SimplifyExpressions {
         let info = SimplifyContext::default()
             .with_schema(schema)
             .with_config_options(config.options())
-            .with_query_execution_start_time(config.query_execution_start_time());
+            .with_query_execution_start_time(config.query_execution_start_time())
+            .with_extension_types(config.extension_types().clone());
 
         // Inputs have already been rewritten (due to bottom-up traversal handled by Optimizer)
         // Just need to rewrite our own expressions

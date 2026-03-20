@@ -175,6 +175,7 @@ impl CastExpr {
         self.target_field.name().is_empty()
             && self.target_field.is_nullable()
             && self.target_field.metadata().is_empty()
+            && self.cast_extension.is_none()
     }
 
     fn resolved_target_field(&self, input_schema: &Schema) -> Result<FieldRef> {
