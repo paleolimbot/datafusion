@@ -1907,6 +1907,9 @@ impl SessionStateBuilder {
             }
         }
 
+        state.execution_props.cast_extension =
+            state.extension_type_registry().cast_extension();
+
         state
     }
 
@@ -2477,6 +2480,12 @@ impl OptimizerConfig for SessionState {
 
     fn function_registry(&self) -> Option<&dyn FunctionRegistry> {
         Some(self)
+    }
+
+    fn cast_extension(
+        &self,
+    ) -> Option<Arc<dyn datafusion_common::nested_struct::CastExtension>> {
+        self.execution_props.cast_extension.clone()
     }
 }
 

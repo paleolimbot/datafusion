@@ -106,7 +106,8 @@ use datafusion_expr::{
 /// * `e` - The logical expression
 /// * `input_dfschema` - The DataFusion schema for the input, used to resolve `Column` references
 ///   to qualified or unqualified fields by name.
-/// * `execution_props` - Per-execution properties such as the query start time.
+/// * `execution_props` - Per-execution properties such as the query start time and
+///   field-aware cast behavior.
 /// * `planning_ctx` - The [`PhysicalPlanningContext`] used to resolve
 ///   `Expr::ScalarSubquery` and `Expr::LambdaVariable` nodes. The physical
 ///   planner threads the subquery index map and shared results container from
@@ -375,6 +376,7 @@ pub fn create_physical_expr(
             create_physical_expr(expr, input_dfschema, execution_props, planning_ctx)?,
             input_schema,
             field,
+            execution_props.cast_extension.clone(),
             None,
         ),
         Expr::TryCast(TryCast { expr, field }) => {

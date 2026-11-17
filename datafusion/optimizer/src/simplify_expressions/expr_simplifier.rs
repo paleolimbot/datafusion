@@ -190,7 +190,8 @@ impl ExprSimplifier {
     ) -> Result<(Transformed<Expr>, u32)> {
         let mut simplifier = Simplifier::new(&self.info);
         let config_options = Some(Arc::clone(self.info.config_options()));
-        let mut const_evaluator = ConstEvaluator::try_new(config_options)?;
+        let mut const_evaluator =
+            ConstEvaluator::try_new(config_options, self.info.cast_extension().cloned())?;
         let mut shorten_in_list_simplifier =
             ShortenInListSimplifier::new(self.info.schema());
         let guarantees_map: HashMap<&Expr, &NullableInterval> =
@@ -594,12 +595,17 @@ impl ConstEvaluator {
     ///
     /// The `config_options` parameter is used to pass session configuration
     /// (like timezone) to scalar functions during constant evaluation.
-    pub fn try_new(config_options: Option<Arc<ConfigOptions>>) -> Result<Self> {
+    /// `cast_extension` supplies field-aware behavior for constant casts.
+    pub fn try_new(
+        config_options: Option<Arc<ConfigOptions>>,
+        cast_extension: Option<Arc<dyn datafusion_common::nested_struct::CastExtension>>,
+    ) -> Result<Self> {
         // The dummy column name is unused and doesn't matter as only
         // expressions without column references can be evaluated
 
         let mut execution_props = ExecutionProps::new();
         execution_props.config_options = config_options;
+        execution_props.cast_extension = cast_extension;
 
         Ok(Self {
             can_evaluate: vec![],
@@ -2446,6 +2452,7 @@ mod tests {
         array::{BooleanArray, Float64Array, Int32Array, StructArray},
         datatypes::{FieldRef, Fields},
     };
+    use datafusion_common::metadata::FieldMetadata;
     use datafusion_common::{DFSchemaRef, ToDFSchema, assert_contains};
     use datafusion_expr::{
         expr::WindowFunction,
@@ -2454,6 +2461,7 @@ mod tests {
             WindowFunctionSimplification,
         },
         interval_arithmetic::Interval,
+        registry::{ExtensionTypeRegistry, MemoryExtensionTypeRegistry},
         *,
     };
     use datafusion_functions_window_common::field::WindowUDFFieldArgs;
@@ -5906,6 +5914,30 @@ mod tests {
         assert!(result.is_err(), "Expected error for invalid cast");
         let err_msg = result.unwrap_err().to_string();
         assert_contains!(err_msg, "Error parsing timestamp");
+    }
+
+    #[test]
+    fn simplify_cast_literal_with_registered_cast_extension() {
+        let registry = MemoryExtensionTypeRegistry::new_with_canonical_extension_types();
+        let bool8_field = Field::new("", DataType::Int8, true).with_metadata([
+            ("ARROW:extension:name".to_owned(), "arrow.bool8".to_owned()),
+            ("ARROW:extension:metadata".to_owned(), String::new()),
+        ]);
+        let expr = Expr::Cast(Cast::new(
+            Box::new(Expr::Literal(
+                ScalarValue::Int8(Some(1)),
+                Some(FieldMetadata::new_from_field(&bool8_field)),
+            )),
+            DataType::Utf8,
+        ));
+        let simplifier = ExprSimplifier::new(
+            SimplifyContext::builder()
+                .with_schema(Arc::new(DFSchema::empty()))
+                .with_cast_extension(registry.cast_extension())
+                .build(),
+        );
+
+        assert_eq!(simplifier.simplify(expr).unwrap(), lit("true"));
     }
 
     fn if_not_null(expr: Expr, then: bool) -> Expr {

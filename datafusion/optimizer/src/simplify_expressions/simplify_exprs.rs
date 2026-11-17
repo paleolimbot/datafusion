@@ -87,6 +87,7 @@ impl SimplifyExpressions {
             .with_schema(schema)
             .with_config_options(config.options())
             .with_query_execution_start_time(config.query_execution_start_time())
+            .with_cast_extension(config.cast_extension())
             .build();
 
         // Inputs have already been rewritten (due to bottom-up traversal handled by Optimizer)
