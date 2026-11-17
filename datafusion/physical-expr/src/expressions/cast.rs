@@ -16,9 +16,10 @@ use arrow_schema::extension::{EXTENSION_TYPE_METADATA_KEY, EXTENSION_TYPE_NAME_K
 use datafusion_common::datatype::DataTypeExt;
 use datafusion_common::format::DEFAULT_FORMAT_OPTIONS;
 use datafusion_common::nested_struct::{
-    requires_nested_struct_cast, validate_data_type_compatibility,
+    CastExtension, DFCastOptions, cast_column_fields, requires_nested_struct_cast,
+    validate_data_type_compatibility_with_options,
 };
-use datafusion_common::{Result, not_impl_err};
+use datafusion_common::{Result, ScalarValue, not_impl_err};
 use datafusion_expr_common::columnar_value::ColumnarValue;
 use datafusion_expr_common::interval_arithmetic::Interval;
 use datafusion_expr_common::sort_properties::ExprProperties;
@@ -127,12 +128,16 @@ impl Hash for OwnedCastOptions {
 /// planning-time validation matches runtime validation, enabling fail-fast behavior
 /// instead of deferring errors to execution. Handles structs at any nesting level
 /// (e.g., `List<Struct>`, `Dictionary<_, Struct>`).
-fn can_cast_named_struct_types(source: &DataType, target: &DataType) -> bool {
-    validate_data_type_compatibility("", source, target).is_ok()
+fn can_cast_named_struct_types(
+    source: &DataType,
+    target: &DataType,
+    options: &DFCastOptions<'_>,
+) -> bool {
+    validate_data_type_compatibility_with_options("", source, target, options).is_ok()
 }
 
 /// CAST expression casts an expression to a specific data type and returns a runtime error on invalid cast
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone)]
 pub struct CastExpr {
     /// The expression to cast
     pub expr: Arc<dyn PhysicalExpr>,
@@ -150,6 +155,10 @@ pub struct CastExpr {
     explicit_target: bool,
     /// Cast options
     cast_options: OwnedCastOptions,
+    /// Source field used to resolve field-aware cast behavior.
+    source_field: Option<FieldRef>,
+    /// Field-aware cast behavior selected during physical planning.
+    cast_extension: Option<Arc<dyn CastExtension>>,
 }
 
 // Manually derive PartialEq and Hash to work around https://github.com/rust-lang/rust/issues/78808
@@ -162,6 +171,12 @@ impl PartialEq for CastExpr {
             && self.target_metadata().eq(&other.target_metadata())
             && self.target_nullable().eq(&other.target_nullable())
             && self.cast_options.eq(&other.cast_options)
+            && self.source_field.eq(&other.source_field)
+            && match (&self.cast_extension, &other.cast_extension) {
+                (Some(left), Some(right)) => Arc::ptr_eq(left, right),
+                (None, None) => true,
+                _ => false,
+            }
     }
 }
 
@@ -180,10 +195,32 @@ impl Hash for CastExpr {
         }
         self.target_nullable().hash(state);
         self.cast_options.hash(state);
+        self.source_field.hash(state);
+        if let Some(extension) = &self.cast_extension {
+            let pointer = Arc::as_ptr(extension).cast::<()>();
+            pointer.hash(state);
+        }
     }
 }
 
+impl Eq for CastExpr {}
+
 impl CastExpr {
+    fn custom_cast_fields(&self) -> Result<Option<(&Field, &Field)>> {
+        let (Some(extension), Some(source_field)) =
+            (self.cast_extension.as_deref(), self.source_field.as_deref())
+        else {
+            return Ok(None);
+        };
+        let options =
+            DFCastOptions::new(self.cast_options()).with_cast_extension(extension);
+        if extension.can_cast_fields(source_field, &self.target_field, &options)? {
+            Ok(Some((source_field, &self.target_field)))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Create a new `CastExpr` using only a `DataType`.
     ///
     /// This constructor creates a type-only cast where metadata and nullability
@@ -203,6 +240,8 @@ impl CastExpr {
             target_field: cast_type.into_nullable_field_ref(),
             explicit_target: false,
             cast_options: cast_options.unwrap_or(DEFAULT_CAST_OPTIONS).into(),
+            source_field: None,
+            cast_extension: None,
         }
     }
 
@@ -229,6 +268,8 @@ impl CastExpr {
             target_field,
             explicit_target: true,
             cast_options: cast_options.unwrap_or(DEFAULT_CAST_OPTIONS).into(),
+            source_field: None,
+            cast_extension: None,
         }
     }
 
@@ -286,6 +327,8 @@ impl CastExpr {
             target_field,
             explicit_target: true,
             cast_options: self.cast_options.clone(),
+            source_field: None,
+            cast_extension: self.cast_extension.clone(),
         }
     }
 
@@ -611,6 +654,29 @@ impl PhysicalExpr for CastExpr {
     fn evaluate(&self, batch: &RecordBatch) -> Result<ColumnarValue> {
         let value = self.expr.evaluate(batch)?;
         let cast_options = self.cast_options();
+        if let Some(cast_extension) = self.cast_extension.as_deref() {
+            let source_field = self.expr.return_field(batch.schema().as_ref())?;
+            let target_field = self.return_field(batch.schema().as_ref())?;
+            let options =
+                DFCastOptions::new(cast_options).with_cast_extension(cast_extension);
+            return match value {
+                ColumnarValue::Array(array) => Ok(ColumnarValue::Array(
+                    cast_column_fields(&array, &source_field, &target_field, &options)?,
+                )),
+                ColumnarValue::Scalar(scalar) => {
+                    let array = scalar.to_array()?;
+                    let result = cast_column_fields(
+                        &array,
+                        &source_field,
+                        &target_field,
+                        &options,
+                    )?;
+                    Ok(ColumnarValue::Scalar(ScalarValue::try_from_array(
+                        &result, 0,
+                    )?))
+                }
+            };
+        }
         value
             .cast_to(self.cast_type(), Some(&cast_options))
             .map_err(|error| {
@@ -646,10 +712,17 @@ impl PhysicalExpr for CastExpr {
             target_field: Arc::clone(&self.target_field),
             explicit_target: self.explicit_target,
             cast_options: self.cast_options.clone(),
+            source_field: self.source_field.clone(),
+            cast_extension: self.cast_extension.clone(),
         }))
     }
 
     fn evaluate_bounds(&self, children: &[&Interval]) -> Result<Interval> {
+        if self.cast_extension.is_some()
+            && (self.source_field.is_none() || self.custom_cast_fields()?.is_some())
+        {
+            return Interval::make_unbounded(self.cast_type());
+        }
         // Cast current node's interval to the right type:
         children[0].cast_to(self.cast_type(), &self.cast_options())
     }
@@ -659,6 +732,11 @@ impl PhysicalExpr for CastExpr {
         interval: &Interval,
         children: &[&Interval],
     ) -> Result<Option<Vec<Interval>>> {
+        if self.cast_extension.is_some()
+            && (self.source_field.is_none() || self.custom_cast_fields()?.is_some())
+        {
+            return Ok(Some(vec![]));
+        }
         let source_type = children[0].data_type();
         let target_type = self.cast_type();
         if !can_propagate_cast_constraints(&source_type, target_type) {
@@ -671,6 +749,40 @@ impl PhysicalExpr for CastExpr {
 
     /// Propagate ordering only for supported order-preserving conversions.
     fn get_properties(&self, children: &[ExprProperties]) -> Result<ExprProperties> {
+        if let Some((source_field, target_field)) = self.custom_cast_fields()? {
+            let extension = self
+                .cast_extension
+                .as_deref()
+                .expect("custom cast fields require an extension");
+            let options =
+                DFCastOptions::new(self.cast_options()).with_cast_extension(extension);
+            let order_preserving = extension.is_order_preserving_fields(
+                source_field,
+                target_field,
+                &options,
+            )?;
+            let preserves_nulls =
+                extension.preserves_nulls_fields(source_field, target_field, &options)?;
+            if order_preserving && preserves_nulls {
+                let injective = extension.is_injective_fields(
+                    source_field,
+                    target_field,
+                    &options,
+                )?;
+                return Ok(children[0]
+                    .clone()
+                    .with_range(Interval::make_unbounded(self.cast_type())?)
+                    .with_strictly_order_preserving(
+                        children[0].strictly_order_preserving && injective,
+                    ));
+            }
+            return Ok(ExprProperties::new_unknown()
+                .with_range(Interval::make_unbounded(self.cast_type())?));
+        }
+        if self.cast_extension.is_some() && self.source_field.is_none() {
+            return Ok(ExprProperties::new_unknown()
+                .with_range(Interval::make_unbounded(self.cast_type())?));
+        }
         cast_expr_properties(&children[0], self.cast_type(), self.cast_options.safe)
     }
 
@@ -694,7 +806,14 @@ impl PhysicalExpr for CastExpr {
             target_field,
             explicit_target,
             cast_options,
+            cast_extension,
+            ..
         } = self;
+        if cast_extension.is_some() {
+            return not_impl_err!(
+                "CastExpr serialization does not support a custom cast extension"
+            );
+        }
         // Presence carries `explicit_target`, even for a default-shaped field.
         let target_field_proto = if *explicit_target {
             Some(target_field.as_ref().try_into()?)
@@ -786,6 +905,8 @@ impl CastExpr {
             target_field,
             explicit_target,
             cast_options,
+            source_field: None,
+            cast_extension: None,
         }))
     }
 }
@@ -808,7 +929,11 @@ pub fn cast_with_options(
     }
 
     let can_build_cast = if requires_nested_struct_cast(&expr_type, &cast_type) {
-        can_cast_named_struct_types(&expr_type, &cast_type)
+        can_cast_named_struct_types(
+            &expr_type,
+            &cast_type,
+            &DFCastOptions::new(cast_options.clone().unwrap_or(DEFAULT_CAST_OPTIONS)),
+        )
     } else {
         can_cast_types(&expr_type, &cast_type)
     };
@@ -831,10 +956,17 @@ pub fn cast_with_target_field(
     expr: Arc<dyn PhysicalExpr>,
     input_schema: &Schema,
     target_field: &FieldRef,
+    cast_extension: Option<Arc<dyn CastExtension>>,
     cast_options: Option<CastOptions<'static>>,
 ) -> Result<Arc<dyn PhysicalExpr>> {
-    let expr_type = expr.data_type(input_schema)?;
+    let source_field = expr.return_field(input_schema)?;
+    let expr_type = source_field.data_type();
     let cast_type = target_field.data_type();
+    let arrow_options = cast_options.clone().unwrap_or(DEFAULT_CAST_OPTIONS);
+    let mut options = DFCastOptions::new(arrow_options);
+    if let Some(extension) = cast_extension.as_deref() {
+        options = options.with_cast_extension(extension);
+    }
 
     // Check if this is a "default" target field (type-only cast with no explicit
     // metadata or nullability constraints). This is the field created by
@@ -847,7 +979,7 @@ pub fn cast_with_target_field(
     // 1. The target is type-only (no explicit metadata)
     // 2. The source has no extension metadata that needs to be stripped
     // Otherwise we need the CastExpr to strip extension metadata from the source.
-    if expr_type == *cast_type && is_type_only {
+    if expr_type == cast_type && is_type_only {
         let source_field = expr.return_field(input_schema)?;
         let has_extension_metadata = source_field
             .metadata()
@@ -857,15 +989,23 @@ pub fn cast_with_target_field(
         }
     }
 
-    let can_build_cast = if requires_nested_struct_cast(&expr_type, cast_type) {
+    let extension_can_cast = match cast_extension.as_deref() {
+        Some(extension) => {
+            extension.can_cast_fields(&source_field, target_field, &options)?
+        }
+        None => false,
+    };
+    let can_build_cast = if extension_can_cast {
+        true
+    } else if requires_nested_struct_cast(expr_type, cast_type) {
         // Allow casts involving structs (including nested inside Lists, Dictionaries,
         // etc.) that pass name-based compatibility validation. This validation is
         // applied at planning time (now) to fail fast, rather than deferring errors
         // to execution time. The name-based casting logic will be executed at runtime
         // via ColumnarValue::cast_to.
-        can_cast_named_struct_types(&expr_type, cast_type)
+        can_cast_named_struct_types(expr_type, cast_type, &options)
     } else {
-        can_cast_types(&expr_type, cast_type)
+        can_cast_types(expr_type, cast_type)
     };
 
     if !can_build_cast {
@@ -875,19 +1015,16 @@ pub fn cast_with_target_field(
     // For type-only casts, use CastExpr::new which preserves source metadata/nullability.
     // For explicit target fields, use new_with_target_field which applies the target's
     // extension metadata and nullability.
-    if is_type_only {
-        Ok(Arc::new(CastExpr::new(
-            expr,
-            cast_type.clone(),
-            cast_options,
-        )))
+    let mut cast_expr = if is_type_only {
+        CastExpr::new(expr, cast_type.clone(), cast_options)
     } else {
-        Ok(Arc::new(CastExpr::new_with_target_field(
-            expr,
-            Arc::clone(target_field),
-            cast_options,
-        )))
+        CastExpr::new_with_target_field(expr, Arc::clone(target_field), cast_options)
+    };
+    if extension_can_cast || expr_type.is_nested() || cast_type.is_nested() {
+        cast_expr.source_field = Some(source_field);
+        cast_expr.cast_extension = cast_extension;
     }
+    Ok(Arc::new(cast_expr))
 }
 
 /// Return a PhysicalExpression representing `expr` casted to

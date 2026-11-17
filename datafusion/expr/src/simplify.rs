@@ -9,6 +9,7 @@ use std::sync::Arc;
 use arrow::datatypes::DataType;
 use chrono::{DateTime, Utc};
 use datafusion_common::config::ConfigOptions;
+use datafusion_common::nested_struct::CastExtension;
 use datafusion_common::{DFSchema, DFSchemaRef, Result};
 
 use crate::{Expr, ExprSchemable};
@@ -25,6 +26,7 @@ pub struct SimplifyContext {
     schema: DFSchemaRef,
     query_execution_start_time: Option<DateTime<Utc>>,
     config_options: Arc<ConfigOptions>,
+    cast_extension: Option<Arc<dyn CastExtension>>,
 }
 
 /// Builder for [`SimplifyContext`].
@@ -33,6 +35,7 @@ pub struct SimplifyContextBuilder {
     schema: Option<DFSchemaRef>,
     query_execution_start_time: Option<DateTime<Utc>>,
     config_options: Option<Arc<ConfigOptions>>,
+    cast_extension: Option<Arc<dyn CastExtension>>,
 }
 
 impl Default for SimplifyContext {
@@ -41,6 +44,7 @@ impl Default for SimplifyContext {
             schema: Arc::new(DFSchema::empty()),
             query_execution_start_time: None,
             config_options: Arc::new(ConfigOptions::default()),
+            cast_extension: None,
         }
     }
 }
@@ -124,6 +128,11 @@ impl SimplifyContext {
     pub fn config_options(&self) -> &Arc<ConfigOptions> {
         &self.config_options
     }
+
+    /// Returns the field-aware cast behavior for this context, if configured.
+    pub fn cast_extension(&self) -> Option<&Arc<dyn CastExtension>> {
+        self.cast_extension.as_ref()
+    }
 }
 
 impl SimplifyContextBuilder {
@@ -154,6 +163,15 @@ impl SimplifyContextBuilder {
         self
     }
 
+    /// Sets the field-aware cast behavior for this context.
+    pub fn with_cast_extension(
+        mut self,
+        cast_extension: Option<Arc<dyn CastExtension>>,
+    ) -> Self {
+        self.cast_extension = cast_extension;
+        self
+    }
+
     /// Build a [`SimplifyContext`], filling in any unspecified fields with defaults.
     pub fn build(self) -> SimplifyContext {
         SimplifyContext {
@@ -162,6 +180,7 @@ impl SimplifyContextBuilder {
             config_options: self
                 .config_options
                 .unwrap_or_else(|| Arc::new(ConfigOptions::default())),
+            cast_extension: self.cast_extension,
         }
     }
 }

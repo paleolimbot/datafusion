@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use datafusion_common::HashMap;
 use datafusion_common::alias::AliasGenerator;
 use datafusion_common::config::ConfigOptions;
+use datafusion_common::nested_struct::CastExtension;
 use std::sync::Arc;
 
 /// Holds properties and scratch state used while optimizing a [`LogicalPlan`]
@@ -46,6 +47,8 @@ pub struct ExecutionProps {
     pub config_options: Option<Arc<ConfigOptions>>,
     /// Providers for scalar variables
     pub var_providers: Option<HashMap<VarType, Arc<dyn VarProvider + Send + Sync>>>,
+    /// Field-aware cast behavior used during optimization and physical planning.
+    pub cast_extension: Option<Arc<dyn CastExtension>>,
 }
 
 impl Default for ExecutionProps {
@@ -62,6 +65,7 @@ impl ExecutionProps {
             alias_generator: Arc::new(AliasGenerator::new()),
             config_options: None,
             var_providers: None,
+            cast_extension: None,
         }
     }
 
@@ -124,7 +128,7 @@ mod test {
     fn debug() {
         let props = ExecutionProps::new();
         assert_eq!(
-            "ExecutionProps { query_execution_start_time: None, alias_generator: AliasGenerator { next_id: 1 }, config_options: None, var_providers: None }",
+            "ExecutionProps { query_execution_start_time: None, alias_generator: AliasGenerator { next_id: 1 }, config_options: None, var_providers: None, cast_extension: None }",
             format!("{props:?}")
         );
     }

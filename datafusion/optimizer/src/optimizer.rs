@@ -8,6 +8,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use datafusion_common::nested_struct::CastExtension;
 use datafusion_expr::registry::FunctionRegistry;
 use datafusion_expr::{InvariantLevel, assert_expected_schema};
 use log::{debug, warn};
@@ -137,6 +138,11 @@ pub trait OptimizerConfig {
     fn options(&self) -> Arc<ConfigOptions>;
 
     fn function_registry(&self) -> Option<&dyn FunctionRegistry> {
+        None
+    }
+
+    /// Returns field-aware cast behavior used by optimizer rules.
+    fn cast_extension(&self) -> Option<Arc<dyn CastExtension>> {
         None
     }
 }

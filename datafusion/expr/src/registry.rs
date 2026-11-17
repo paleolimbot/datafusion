@@ -8,17 +8,23 @@ use crate::expr_rewriter::FunctionRewrite;
 use crate::higher_order_function::HigherOrderUDF;
 use crate::planner::ExprPlanner;
 use crate::{AggregateUDF, ScalarUDF, UserDefinedLogicalNode, WindowUDF};
+use arrow::array::{ArrayRef, Int8Array, StringArray};
+use arrow::compute::cast_with_options;
 use arrow::datatypes::Field;
 use arrow_schema::DataType;
 use arrow_schema::extension::{
     Bool8, ExtensionType, FixedShapeTensor, Json, Opaque, TimestampWithOffset, Uuid,
     VariableShapeTensor,
 };
+use datafusion_common::metadata::format_type_and_metadata;
+use datafusion_common::nested_struct::{CastExtension, DFCastOptions};
 use datafusion_common::types::{
     DFBool8, DFExtensionTypeRef, DFFixedShapeTensor, DFJson, DFOpaque,
     DFTimestampWithOffset, DFUuid, DFVariableShapeTensor,
 };
-use datafusion_common::{HashMap, Result, not_impl_err, plan_datafusion_err};
+use datafusion_common::{
+    HashMap, Result, internal_err, not_impl_err, plan_datafusion_err,
+};
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::sync::{Arc, RwLock};
@@ -333,6 +339,19 @@ pub trait ExtensionTypeRegistry: Debug + Send + Sync {
         &self,
         name: &str,
     ) -> Result<Option<ExtensionTypeRegistrationRef>>;
+
+    /// Returns a [`CastExtension`] that may be used to override casts to and from extension types
+    /// in the registry.
+    fn cast_extension(&self) -> Option<Arc<dyn CastExtension>> {
+        None
+    }
+
+    /// Adds a cast extension that may override casts between arbitrary fields.
+    fn add_cast_extension(&self, _extension: Arc<dyn CastExtension>) -> Result<()> {
+        not_impl_err!(
+            "ExtensionTypeRegistry does not support registration of custom cast extensions"
+        )
+    }
 }
 
 /// A factory that creates instances of extension types from a storage [`DataType`] and the
@@ -418,6 +437,8 @@ impl Debug for ExtensionTypeRegistration {
 pub struct MemoryExtensionTypeRegistry {
     /// Holds a mapping between the name of an extension type and its logical type.
     extension_types: Arc<RwLock<HashMap<String, ExtensionTypeRegistrationRef>>>,
+    /// Holds a list of custom cast rules
+    cast_extensions: Arc<RwLock<Vec<Arc<dyn CastExtension>>>>,
 }
 
 impl Default for MemoryExtensionTypeRegistry {
@@ -431,6 +452,7 @@ impl MemoryExtensionTypeRegistry {
     pub fn new_empty() -> Self {
         Self {
             extension_types: Arc::new(RwLock::new(HashMap::new())),
+            cast_extensions: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -496,9 +518,15 @@ impl MemoryExtensionTypeRegistry {
             extension_types.insert(registration.type_name().to_owned(), registration);
         }
 
-        Self {
+        let registry = Self {
             extension_types: Arc::new(RwLock::new(HashMap::from(extension_types))),
-        }
+            cast_extensions: Arc::new(RwLock::new(Vec::new())),
+        };
+        let casts: Arc<dyn CastExtension> = Arc::new(Bool8Casts);
+        registry
+            .add_cast_extension(casts)
+            .expect("in-memory cast registry is writable");
+        registry
     }
 
     /// Creates a new [MemoryExtensionTypeRegistry] with the provided `types`.
@@ -515,6 +543,7 @@ impl MemoryExtensionTypeRegistry {
             .collect::<HashMap<_, _>>();
         Ok(Self {
             extension_types: Arc::new(RwLock::new(extension_types)),
+            cast_extensions: Arc::new(RwLock::new(Vec::new())),
         })
     }
 
@@ -572,12 +601,376 @@ impl ExtensionTypeRegistry for MemoryExtensionTypeRegistry {
             .expect("Extension type registry lock poisoned")
             .remove(name))
     }
+
+    fn cast_extension(&self) -> Option<Arc<dyn CastExtension>> {
+        (!self
+            .cast_extensions
+            .read()
+            .expect("Cast extension registry lock poisoned")
+            .is_empty())
+        .then(|| Arc::new(self.clone()) as Arc<dyn CastExtension>)
+    }
+
+    fn add_cast_extension(&self, extension: Arc<dyn CastExtension>) -> Result<()> {
+        self.cast_extensions
+            .write()
+            .expect("Cast extension registry lock poisoned")
+            .push(extension);
+        Ok(())
+    }
 }
 
 impl From<HashMap<String, ExtensionTypeRegistrationRef>> for MemoryExtensionTypeRegistry {
     fn from(value: HashMap<String, ExtensionTypeRegistrationRef>) -> Self {
         Self {
             extension_types: Arc::new(RwLock::new(value)),
+            cast_extensions: Arc::new(RwLock::new(Vec::new())),
         }
+    }
+}
+
+impl MemoryExtensionTypeRegistry {
+    fn matching_cast_extension(
+        &self,
+        source_field: &Field,
+        target_field: &Field,
+        options: &DFCastOptions<'_>,
+    ) -> Result<Option<Arc<dyn CastExtension>>> {
+        let registrations = self
+            .cast_extensions
+            .read()
+            .expect("Cast extension registry lock poisoned")
+            .clone();
+
+        let mut matching_indices = Vec::new();
+        for (index, registration) in registrations.iter().enumerate() {
+            if registration.can_cast_fields(source_field, target_field, options)? {
+                matching_indices.push(index);
+            }
+        }
+
+        match matching_indices.as_slice() {
+            [] => Ok(None),
+            [index] => Ok(Some(Arc::clone(&registrations[*index]))),
+            _ => internal_err!(
+                "Multiple registered cast extensions can cast field from {} to {}",
+                format_type_and_metadata(
+                    source_field.data_type(),
+                    Some(source_field.metadata())
+                ),
+                format_type_and_metadata(
+                    target_field.data_type(),
+                    Some(target_field.metadata())
+                )
+            ),
+        }
+    }
+}
+
+impl CastExtension for MemoryExtensionTypeRegistry {
+    fn can_cast_fields(
+        &self,
+        source_field: &Field,
+        target_field: &Field,
+        options: &DFCastOptions<'_>,
+    ) -> Result<bool> {
+        Ok(self
+            .matching_cast_extension(source_field, target_field, options)?
+            .is_some())
+    }
+
+    fn is_injective_fields(
+        &self,
+        source_field: &Field,
+        target_field: &Field,
+        options: &DFCastOptions<'_>,
+    ) -> Result<bool> {
+        let Some(extension) =
+            self.matching_cast_extension(source_field, target_field, options)?
+        else {
+            return Ok(false);
+        };
+        extension.is_injective_fields(source_field, target_field, options)
+    }
+
+    fn is_order_preserving_fields(
+        &self,
+        source_field: &Field,
+        target_field: &Field,
+        options: &DFCastOptions<'_>,
+    ) -> Result<bool> {
+        let Some(extension) =
+            self.matching_cast_extension(source_field, target_field, options)?
+        else {
+            return Ok(false);
+        };
+        extension.is_order_preserving_fields(source_field, target_field, options)
+    }
+
+    fn preserves_nulls_fields(
+        &self,
+        source_field: &Field,
+        target_field: &Field,
+        options: &DFCastOptions<'_>,
+    ) -> Result<bool> {
+        let Some(extension) =
+            self.matching_cast_extension(source_field, target_field, options)?
+        else {
+            return Ok(false);
+        };
+        extension.preserves_nulls_fields(source_field, target_field, options)
+    }
+
+    fn cast_array_fields(
+        &self,
+        array: &ArrayRef,
+        source_field: &Field,
+        target_field: &Field,
+        options: &DFCastOptions<'_>,
+    ) -> Result<ArrayRef> {
+        let Some(extension) =
+            self.matching_cast_extension(source_field, target_field, options)?
+        else {
+            return internal_err!(
+                "No registered cast extension can cast field from {} to {}",
+                source_field.data_type(),
+                target_field.data_type()
+            );
+        };
+        extension.cast_array_fields(array, source_field, target_field, options)
+    }
+}
+
+#[derive(Debug)]
+struct Bool8Casts;
+
+impl CastExtension for Bool8Casts {
+    fn can_cast_fields(
+        &self,
+        source_field: &Field,
+        target_field: &Field,
+        _options: &DFCastOptions<'_>,
+    ) -> Result<bool> {
+        let source_is_bool8 = validate_bool8_field(source_field)?;
+        let target_is_bool8 = validate_bool8_field(target_field)?;
+
+        Ok(match (source_is_bool8, target_is_bool8) {
+            (true, true) => true,
+            (true, false) => {
+                target_field.extension_type_name().is_none()
+                    && (target_field.data_type() == &DataType::Int8
+                        || is_string_type(target_field.data_type()))
+            }
+            (false, true) => {
+                source_field.extension_type_name().is_none()
+                    && source_field.data_type() == &DataType::Int8
+            }
+            (false, false) => false,
+        })
+    }
+
+    fn is_injective_fields(
+        &self,
+        source_field: &Field,
+        target_field: &Field,
+        _options: &DFCastOptions<'_>,
+    ) -> Result<bool> {
+        Ok(!is_string_type(target_field.data_type())
+            && (source_field.extension_type_name() == Some(Bool8::NAME)
+                || target_field.extension_type_name() == Some(Bool8::NAME)))
+    }
+
+    fn is_order_preserving_fields(
+        &self,
+        source_field: &Field,
+        target_field: &Field,
+        options: &DFCastOptions<'_>,
+    ) -> Result<bool> {
+        self.is_injective_fields(source_field, target_field, options)
+    }
+
+    fn preserves_nulls_fields(
+        &self,
+        _source_field: &Field,
+        _target_field: &Field,
+        _options: &DFCastOptions<'_>,
+    ) -> Result<bool> {
+        Ok(true)
+    }
+
+    fn cast_array_fields(
+        &self,
+        array: &ArrayRef,
+        source_field: &Field,
+        target_field: &Field,
+        options: &DFCastOptions<'_>,
+    ) -> Result<ArrayRef> {
+        if !self.can_cast_fields(source_field, target_field, options)? {
+            return internal_err!("Bool8 cast cannot cast supplied fields");
+        }
+        if array.data_type() != source_field.data_type() {
+            return internal_err!(
+                "Bool8 cast received array of type {}, expected {}",
+                array.data_type(),
+                source_field.data_type()
+            );
+        }
+
+        if source_field.extension_type_name() == Some(Bool8::NAME)
+            && is_string_type(target_field.data_type())
+        {
+            let Some(array) = array.as_any().downcast_ref::<Int8Array>() else {
+                return internal_err!("Bool8 storage array must have Int8 array type");
+            };
+            let strings: ArrayRef =
+                Arc::new(StringArray::from_iter(array.iter().map(|value| {
+                    value.map(|value| if value == 0 { "false" } else { "true" })
+                })));
+            return Ok(cast_with_options(
+                &strings,
+                target_field.data_type(),
+                &options.arrow_options,
+            )?);
+        }
+
+        Ok(Arc::clone(array))
+    }
+}
+
+fn validate_bool8_field(field: &Field) -> Result<bool> {
+    if field.extension_type_name() != Some(Bool8::NAME) {
+        return Ok(false);
+    }
+    DFBool8::try_new(
+        field.data_type(),
+        Bool8::deserialize_metadata(field.extension_type_metadata())?,
+    )?;
+    Ok(true)
+}
+
+fn is_string_type(data_type: &DataType) -> bool {
+    matches!(
+        data_type,
+        DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow::array::{AsArray, LargeStringArray, StringViewArray};
+
+    fn bool8_field(data_type: DataType) -> Field {
+        Field::new("value", data_type, true).with_extension_type(Bool8)
+    }
+
+    fn options(extension: &dyn CastExtension) -> DFCastOptions<'_> {
+        DFCastOptions::default().with_cast_extension(extension)
+    }
+
+    #[test]
+    fn empty_registry_has_no_cast_extension() {
+        assert!(
+            MemoryExtensionTypeRegistry::new_empty()
+                .cast_extension()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn bool8_casts_to_string_types() -> Result<()> {
+        let registry = MemoryExtensionTypeRegistry::new_with_canonical_extension_types();
+        let extension = registry.cast_extension().unwrap();
+        let options = options(extension.as_ref());
+        let source_field = bool8_field(DataType::Int8);
+        let values: ArrayRef =
+            Arc::new(Int8Array::from(vec![Some(0), Some(1), Some(-1), None]));
+
+        let utf8 = extension.cast_array_fields(
+            &values,
+            &source_field,
+            &Field::new("value", DataType::Utf8, true),
+            &options,
+        )?;
+        assert_eq!(
+            utf8.as_string::<i32>().iter().collect::<Vec<_>>(),
+            vec![Some("false"), Some("true"), Some("true"), None]
+        );
+
+        let large_utf8 = extension.cast_array_fields(
+            &values,
+            &source_field,
+            &Field::new("value", DataType::LargeUtf8, true),
+            &options,
+        )?;
+        assert!(large_utf8.as_any().is::<LargeStringArray>());
+
+        let utf8_view = extension.cast_array_fields(
+            &values,
+            &source_field,
+            &Field::new("value", DataType::Utf8View, true),
+            &options,
+        )?;
+        assert!(utf8_view.as_any().is::<StringViewArray>());
+        Ok(())
+    }
+
+    #[test]
+    fn bool8_casts_to_and_from_storage_type() -> Result<()> {
+        let registry = MemoryExtensionTypeRegistry::new_with_canonical_extension_types();
+        let extension = registry.cast_extension().unwrap();
+        let options = options(extension.as_ref());
+        let bool8 = bool8_field(DataType::Int8);
+        let storage = Field::new("value", DataType::Int8, true);
+        let values: ArrayRef = Arc::new(Int8Array::from(vec![0, 1, -1]));
+
+        let to_storage =
+            extension.cast_array_fields(&values, &bool8, &storage, &options)?;
+        let from_storage =
+            extension.cast_array_fields(&values, &storage, &bool8, &options)?;
+        assert!(Arc::ptr_eq(&values, &to_storage));
+        assert!(Arc::ptr_eq(&values, &from_storage));
+        Ok(())
+    }
+
+    #[test]
+    fn bool8_cast_rejects_invalid_storage_type() {
+        let registry = MemoryExtensionTypeRegistry::new_with_canonical_extension_types();
+        let extension = registry.cast_extension().unwrap();
+        let options = options(extension.as_ref());
+        let invalid_bool8 = Field::new("value", DataType::Int16, true)
+            .with_metadata([("ARROW:extension:name".to_owned(), Bool8::NAME.to_owned())]);
+        let string = Field::new("value", DataType::Utf8, true);
+
+        assert!(
+            extension
+                .can_cast_fields(&invalid_bool8, &string, &options)
+                .is_err()
+        );
+        assert!(
+            extension
+                .can_cast_fields(&string, &invalid_bool8, &options)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn cast_registry_rejects_ambiguous_matches() -> Result<()> {
+        let registry = MemoryExtensionTypeRegistry::new_with_canonical_extension_types();
+        let bool8 = bool8_field(DataType::Int8);
+        registry.add_cast_extension(Arc::new(Bool8Casts))?;
+        let extension = registry.cast_extension().unwrap();
+        let options = options(extension.as_ref());
+
+        let error = extension
+            .can_cast_fields(&bool8, &Field::new("value", DataType::Utf8, true), &options)
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Multiple registered cast extensions")
+        );
+        assert!(error.to_string().contains(Bool8::NAME));
+        Ok(())
     }
 }
